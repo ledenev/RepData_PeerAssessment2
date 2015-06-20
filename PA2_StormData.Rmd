@@ -1,0 +1,263 @@
+---
+title: "Gone with the wind, flood, and heat."
+output: 
+  html_document:
+    keep_md: true
+---
+
+```{r setup, cache=FALSE, include=FALSE}  
+library(knitr)  
+opts_chunk$set(fig.path='figure/')  
+```
+
+## Synopsis
+
+In this report we aim to explore the U.S. National Oceanic and Atmospheric Administration’s (NOAA) storm database. This database tracks characteristics of major storms and weather events in the United States, including when and where they occur, as well as estimates of any fatalities, injuries, and property damage. Data collection and processing procedures have been changing over time. To get more consistent results, this report operates with median values of harm to population and damages per year. Following table shows which types of events bring the most harmful consequences to population health and economic across the United States.
+
+Pos | Most harmful to population health | Greatest economic consequences
+----|-----------------------------------|-------------------------------
+ 1  | Tornado | Flood
+ 2  | Heat | Hurricane/Typhoon
+ 3  | Thunderstorm Wind | Flash Flood
+
+## Data Processing
+
+Let's start with loading of libraries needed to this project.
+
+```{r, results='hide', message=FALSE}
+library(dplyr)
+library(reshape2)
+```
+
+#### Reading data
+
+```{r}
+setClass("myDate")
+setAs("character", "myDate",
+      function(from) as.Date(from, format="%m/%d/%Y %H:%M:%S"))
+storm_classes <- c("BGN_DATE"="myDate")
+
+src <- "repdata-data-StormData.csv"
+src_tbl <- read.csv(src, header=TRUE, colClasses=storm_classes, stringsAsFactors=FALSE)
+storm_tbl <- src_tbl %>%
+    select(BGN_DATE, EVTYPE, FATALITIES, INJURIES, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP)
+names(storm_tbl) <- tolower(names(storm_tbl))
+storm_tbl$bgn_date <- as.character(format(storm_tbl$bgn_date, "%Y"))
+```
+
+#### Reading EVTYPE filter from file
+
+```{r}
+evtype_filter<-read.csv("evtype_filter.csv", header=TRUE, stringsAsFactors=FALSE)
+```
+
+### 1. Analysis of consequences to population health
+
+```{r}
+fat_inj_tbl <- storm_tbl[storm_tbl$fatalities != 0 | storm_tbl$injuries != 0,]
+fat_inj_tbl <- fat_inj_tbl %>% select(bgn_date, evtype, fatalities, injuries)
+```
+
+Clean up and convert EVTYPE to 48 storm event types specified by NOAA.
+
+```{r}
+fat_inj_tbl$not_fixed <- TRUE
+
+for (i in 1:nrow(evtype_filter)) {
+    idx<-grep(evtype_filter$pattern[i], fat_inj_tbl$evtype, ignore.case=TRUE)
+    fix_vector <- fat_inj_tbl$not_fixed[idx]
+    idx<-idx[fix_vector]
+    if (length(idx) > 0) {
+        fat_inj_tbl$evtype[idx] <- evtype_filter$substitute[i]
+        fat_inj_tbl$not_fixed[idx] <- FALSE
+    }
+}
+fat_inj_tbl$evtype<-as.factor(fat_inj_tbl$evtype)
+fatalities_tbl <- fat_inj_tbl %>% select(-injuries, -not_fixed)
+injuries_tbl <- fat_inj_tbl %>% select(-fatalities, -not_fixed)
+```
+
+Reshape fatalities and injuries tables to wide tidy form and summarize harm for each year. In result, we get tables with 61 rows which correspond to years from 1950 to 2011, and columns represent EVTYPEs. See fragment of reshaped fatalities table below.
+
+```{r}
+fatalities_tbl <- dcast(fatalities_tbl, bgn_date ~ evtype, value.var="fatalities", sum)
+injuries_tbl <- dcast(injuries_tbl, bgn_date ~ evtype, value.var="injuries", sum)
+
+print(fatalities_tbl[35:40, c(1, 28:31)], right=FALSE, row.names=FALSE)
+```
+
+The events in the database start from January 1950 and end in November 2011. Due to changes in the data collection and processing procedures over time, there are unique periods of record available depending on the event type. The following table shows the different time spans for each period of unique data collection and processing procedures.
+
+Storm Events | Storm Events Database Period Of Record
+-----------------------------------|-------------------------------
+Tornado | 1950 - 2011
+Tornado, Thunderstorm Wind, Hail | 1955 - 2011
+All Event Types | 1996 - 2011
+
+To equalize records that have been made during different time periods, we calculate median values of fatalities and injuries through periods of available records for each type of storm events. We use only non-zero values to calculate medians. It allows to estimate possible harm in a case if some of storm event happens.
+
+```{r}
+evtype <- names(fatalities_tbl)[2:ncol(fatalities_tbl)]
+fatalities <- c()
+injuries <- c()
+
+for (name in evtype) {
+    indexes <- fatalities_tbl[,name] > 0
+    values  <- fatalities_tbl[indexes, name]
+    fatalities <- c(fatalities, median(values))
+}
+for (name in evtype) {
+    indexes <- injuries_tbl[,name] > 0
+    values  <- injuries_tbl[indexes, name]
+    injuries <- c(injuries, median(values))
+}
+fatalities <- ceiling(fatalities)
+injuries   <- ceiling(injuries)
+total_harm <- fatalities + injuries
+harm_tbl   <- data.frame(evtype, fatalities, injuries, total_harm)
+
+order_v  <- order(harm_tbl$total_harm, decreasing=TRUE)
+harm_tbl <- harm_tbl[order_v,]
+harm_tbl <- harm_tbl[1:10,]
+row.names(harm_tbl) <- c(1:10)
+harm_tbl$evtype <- as.factor(as.character(harm_tbl$evtype))
+```
+
+### 2. Analysis of consequences to economics
+
+```{r}
+damage_tbl <- storm_tbl[storm_tbl$propdmg != 0 | storm_tbl$cropdmg != 0,]
+damage_tbl <- damage_tbl %>% select(-fatalities, -injuries)
+
+damage_tbl$propdmgexp<-toupper(damage_tbl$propdmgexp)
+damage_tbl$cropdmgexp<-toupper(damage_tbl$cropdmgexp)
+
+damage_tbl$prop_mult <- 1.0
+damage_tbl$prop_mult[damage_tbl$propdmgexp == "H"] <- 100.0
+damage_tbl$prop_mult[damage_tbl$propdmgexp == "K"] <- 1000.0
+damage_tbl$prop_mult[damage_tbl$propdmgexp == "M"] <- 1000000.0
+damage_tbl$prop_mult[damage_tbl$propdmgexp == "B"] <- 1000000000.0
+
+damage_tbl$propdmg <- damage_tbl$propdmg * damage_tbl$prop_mult
+
+damage_tbl$crop_mult <- 1.0
+damage_tbl$crop_mult[damage_tbl$cropdmgexp == "H"] <- 100.0
+damage_tbl$crop_mult[damage_tbl$cropdmgexp == "K"] <- 1000.0
+damage_tbl$crop_mult[damage_tbl$cropdmgexp == "M"] <- 1000000.0
+damage_tbl$crop_mult[damage_tbl$cropdmgexp == "B"] <- 1000000000.0
+
+damage_tbl$cropdmg <- damage_tbl$cropdmg * damage_tbl$crop_mult
+damage_tbl <- damage_tbl %>% select(bgn_date, evtype, propdmg, cropdmg)
+```
+
+Clean up and convert EVTYPE to 48 storm event types specified by NOAA.
+
+
+```{r}
+damage_tbl$not_fixed <- TRUE
+
+for (i in 1:nrow(evtype_filter)) {
+    idx<-grep(evtype_filter$pattern[i], damage_tbl$evtype, ignore.case=TRUE)
+    fix_vector <- damage_tbl$not_fixed[idx]
+    idx<-idx[fix_vector]
+    if (length(idx) > 0) {
+        damage_tbl$evtype[idx] <- evtype_filter$substitute[i]
+        damage_tbl$not_fixed[idx] <- FALSE
+    }
+}
+damage_tbl$evtype<-as.factor(damage_tbl$evtype)
+prop_dmg_tbl <- damage_tbl %>% select(-cropdmg, -not_fixed)
+crop_dmg_tbl <- damage_tbl %>% select(-propdmg, -not_fixed)
+```
+
+Reshape fatalities and injuries tables to wide tidy form and summarize damage for each year. In result, we get tables with 61 rows which correspond to years from 1950 to 2011, and columns represent EVTYPEs. See fragment of reshaped property table below.
+
+```{r}
+prop_dmg_tbl <- dcast(prop_dmg_tbl, bgn_date ~ evtype, value.var="propdmg", sum)
+crop_dmg_tbl <- dcast(crop_dmg_tbl, bgn_date ~ evtype, value.var="cropdmg", sum)
+
+print(prop_dmg_tbl[45:50, c(1, 15:19)], right=FALSE, row.names=FALSE)
+```
+
+To equalize records that have been made during different time periods, we calculate median values of property and crop damages through periods of available records for each type of storm events. We use only non-zero values to calculate medians. It allows to estimate possible damage in a case if some of storm event happens.
+
+```{r}
+evtype <- names(prop_dmg_tbl)[2:ncol(prop_dmg_tbl)]
+property_damage <- c()
+crop_damage <- c()
+
+for (name in evtype) {
+    indexes <- prop_dmg_tbl[,name] > 0
+    values  <- prop_dmg_tbl[indexes, name]
+    property_damage <- c(property_damage, median(values))
+}
+for (name in evtype) {
+    indexes <- crop_dmg_tbl[,name] > 0
+    values  <- crop_dmg_tbl[indexes, name]
+    crop_damage <- c(crop_damage, median(values))
+}
+total_damage <- property_damage + crop_damage
+dmg_tbl <- data.frame(evtype, property_damage, crop_damage, total_damage)
+
+order_v <- order(dmg_tbl$total_damage, decreasing=TRUE)
+dmg_tbl <- dmg_tbl[order_v,]
+dmg_tbl <- dmg_tbl[1:10,]
+row.names(dmg_tbl) <- c(1:10)
+dmg_tbl$evtype <- as.factor(as.character(dmg_tbl$evtype))
+```
+
+## Results
+
+### 1. Top 10 storm events which have largest consequences to population health
+
+```{r}
+oldpar <- par(mar = c(7, 4, 4, 2) + 0.1)
+```
+
+```{r}
+plot_tbl <- rbind(harm_tbl$fatalities, harm_tbl$injuries)
+
+harm_plot <- barplot(plot_tbl, col=c("red","goldenrod1"),
+                     main="Harm to population per year (median) across the U.S.",
+                     ylab="Number of people")
+legend("topright", c("Fatalities","Injuries"),
+       pch=15, col=c("red","goldenrod1"))
+text(harm_plot, par("usr")[3]-0.25,
+     labels=harm_tbl$evtype, srt=45, adj=1, xpd=TRUE)
+```
+
+```{r}
+print(harm_tbl, right=FALSE)
+```
+
+### 2. Top 10 storm events which have largest consequences to economics
+
+```{r}
+bar_1 <- ceiling(dmg_tbl$property_damage / 1000000.0)
+bar_2 <- ceiling(dmg_tbl$crop_damage / 1000000.0)
+plot_tbl <- rbind(bar_1, bar_2)
+
+dmg_plot <- barplot(plot_tbl, col=c("darksalmon","forestgreen"),
+                    main="Damage per year (median) across the U.S.",
+                    ylab="Total damage (millions of dollars)")
+legend("topright", c("Property","Crop"),
+       pch=15, col=c("darksalmon","forestgreen"))
+text(dmg_plot, par("usr")[3]-0.25,
+     labels=dmg_tbl$evtype, srt=45, adj=1, xpd=TRUE)
+```
+
+```{r}
+print(dmg_tbl, right=FALSE)
+```
+
+```{r}
+par(oldpar)
+```
+
+-----------------------------------------
+
+#### This is EVTYPE filter which is stored in file "evtype_filter.csv"
+
+```{r}
+print(evtype_filter, right=FALSE)
+```
