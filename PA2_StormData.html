@@ -106,7 +106,7 @@ setAs(&quot;character&quot;, &quot;myDate&quot;,
       function(from) as.Date(from, format=&quot;%m/%d/%Y %H:%M:%S&quot;))
 storm_classes &lt;- c(&quot;BGN_DATE&quot;=&quot;myDate&quot;)
 
-src &lt;- &quot;repdata-data-StormData.csv&quot;
+src &lt;- &quot;repdata-data-StormData.csv.bz2&quot;
 src_tbl &lt;- read.csv(src, header=TRUE, colClasses=storm_classes, stringsAsFactors=FALSE)
 storm_tbl &lt;- src_tbl %&gt;%
     select(BGN_DATE, EVTYPE, FATALITIES, INJURIES, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP)

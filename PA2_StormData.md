@@ -31,7 +31,7 @@ setAs("character", "myDate",
       function(from) as.Date(from, format="%m/%d/%Y %H:%M:%S"))
 storm_classes <- c("BGN_DATE"="myDate")
 
-src <- "repdata-data-StormData.csv"
+src <- "repdata-data-StormData.csv.bz2"
 src_tbl <- read.csv(src, header=TRUE, colClasses=storm_classes, stringsAsFactors=FALSE)
 storm_tbl <- src_tbl %>%
     select(BGN_DATE, EVTYPE, FATALITIES, INJURIES, PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP)
